@@ -7,10 +7,6 @@ settings:
 importers:
 
   .:
-    dependencies:
-      '@no-more-standups/core':
-        specifier: workspace:*
-        version: link:packages/core
     devDependencies:
       '@types/node':
         specifier: ^22.15.19
