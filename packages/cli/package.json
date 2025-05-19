@@ -1,0 +1,20 @@
+{
+  "name": "@no-more-standups/cli",
+  "version": "0.1.0",
+  "description": "No More Standups CLI",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "test": "vitest"
+  },
+  "dependencies": {
+    "@no-more-standups/core": "workspace:*",
+    "ts-node": "^10.9.2"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.4"
+  }
+}

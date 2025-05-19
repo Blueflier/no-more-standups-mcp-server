@@ -1,0 +1,10 @@
+---
+description: high level tasks when the user ask to implement one of the phases
+globs: 
+alwaysApply: false
+---
+1. always fully understand the end desired goal of the entire no-more-standup-mcp by using [prd.mdc](mdc:.cursor/context/prd.mdc)
+2. understand which frameworks to use, do not add any additonal ones
+3. implement each phase in a logical fashion
+4. ask questions if necessary
+5. after the phase finishes, check the tasks off in phase that were completed

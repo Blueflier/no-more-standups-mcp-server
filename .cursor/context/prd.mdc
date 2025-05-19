@@ -1,0 +1,237 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+Product Requirements Document: MCP-Local
+
+Motto: No More Standups! Automated Commit Summaries for Developers.
+
+Version: 1.0
+Date: May 19, 2025
+Author: AI Assistant (based on user input)
+
+1. Introduction & Overview
+
+1.1. What is MCP-Local?
+MCP-Local (Meaningful Commit Processor - Local) is a developer tool designed to run on a user's local machine. It integrates with Git repositories to automatically analyze code changes upon each commit, leverage Large Language Models (LLMs) to generate insightful summaries, and create a structured, human-readable development log.
+
+1.2. Problem Statement
+Developers often spend significant time manually writing commit messages that fully capture intent, reporting progress in stand-ups, and trying to recall details of past work. This can lead to:
+
+    Inefficient stand-up meetings.
+    Inconsistent quality and detail in commit/development logs.
+    Difficulty in understanding the evolution of a codebase over time.
+    Time taken away from core development tasks.
+
+1.3. Proposed Solution
+MCP-Local aims to solve these problems by providing an automated system that:
+
+    Installs a Git post-commit hook.
+    Queues commit information for background processing.
+    Performs deep code analysis (including Abstract Syntax Tree (AST) parsing for supported languages).
+    Uses user-configured LLMs (e.g., OpenAI, Gemini, Claude) to generate summaries of changes.
+    Writes these summaries to daily Markdown log files stored locally within the repository.
+    Simplifies setup and runs seamlessly in the background.
+
+2. Goals & Objectives
+
+    G1: Automate the generation of meaningful and context-rich summaries for every Git commit.
+    G2: Significantly reduce the time developers spend on manual progress reporting and writing detailed retroactive summaries.
+    G3: Improve the quality, consistency, and searchability of development logs.
+    G4: Provide developers with an easily accessible, local history of their code contributions and the "why" behind changes.
+    G5: Ensure a simple and quick setup process, with the tool operating unobtrusively in the background post-initialization.
+    G6: Offer flexibility through configurable LLM providers and models.
+
+3. Target Audience
+
+    TA1: Individual software developers using Git for version control.
+    TA2: Development teams seeking to improve internal logging practices, knowledge sharing, and the efficiency of update meetings.
+    TA3: Developers working on projects requiring detailed tracking of changes and intent.
+
+4. Product Description
+
+MCP-Local is a command-line interface (CLI) tool coupled with a background daemon service. After a one-time global installation, users can initialize MCP-Local in any Git repository using a single init command. This command sets up a post-commit hook and automatically starts (or ensures the start of) a background daemon.
+
+On each git commit, the hook captures the commit details and adds them to a local, persistent queue within the repository. The background daemon monitors this queue and processes each commit. Processing involves:
+
+    Extracting detailed file changes and status.
+    Performing AST-level analysis for JavaScript/TypeScript files to identify function-level changes (added, modified, deleted).
+    Generating raw diffs for other text files or as a fallback.
+    Constructing a prompt with this structured information.
+    Sending the prompt to a user-configured LLM (via API keys stored in a global config file).
+    Receiving the LLM-generated summary.
+    Appending this summary, along with metadata, to a daily Markdown log file stored in the .mcp_logs directory of the repository.
+
+The tool will provide CLI commands for initial setup, basic queue management, and viewing generated logs. It will prioritize a fast post-commit hook execution, with all intensive processing handled asynchronously by the daemon.
+
+5. Key Features & Requirements
+
+F1: Project Initialization & Configuration
+
+    FR1.1 (CLI: mcp-local init): A command to initialize MCP-Local within the current Git repository.
+        FR1.1.1: Must verify that the current directory is a valid Git repository. If not, it should exit with an error.
+        FR1.1.2: Shall install a Git post-commit hook script in .git/hooks/post-commit.
+            If an existing post-commit hook exists and is not an MCP-Local hook, it must be backed up (e.g., post-commit.mcp-backup-YYYYMMDDHHMMSS) before overwriting.
+            The hook script must contain a marker (e.g., # MCP-Local HOOK) for identification.
+        FR1.1.3: Shall create necessary local directories if they don't exist (e.g., .mcp_logs/, .mcp_queue file, .mcp_errors/ within the repository).
+        FR1.1.4: Shall automatically start or ensure the background daemon service is running for the current repository.
+    FR1.2 (Global Configuration):
+        FR1.2.1: The system must use a global configuration file located at ~/.mcp/config.json.
+        FR1.2.2: This file will store LLM provider details (choice of 'openai', 'gemini', 'claude'), API keys, and preferred model names.
+        FR1.2.3: A core library function must be implemented to securely load, validate (against a defined schema), and provide this configuration to the application. Invalid or missing configuration (for required fields like API key for the selected provider) should result in actionable error messages.
+    FR1.3 (CLI: mcp-local setup-config): A command to guide the user through creating or editing the global ~/.mcp/config.json file, explaining required fields.
+
+F2: Automated Commit Processing Engine
+
+    FR2.1 (Post-Commit Hook):
+        FR2.1.1: The hook script must execute quickly (target < 100ms) to avoid delaying the git commit operation.
+        FR2.1.2: It must capture the latest commit SHA and current timestamp.
+        FR2.1.3: It must append a new entry (SHA, timestamp, initial status 'queued') in NDJSON format to a local queue file (e.g., .mcp_queue) within the repository.
+        FR2.1.4: The hook should provide minimal console output on success or clear error indication if enqueuing fails.
+    FR2.2 (Background Daemon Service - mcp-local daemon):
+        FR2.2.1: The daemon must monitor the .mcp_queue file for new entries using a file watcher (e.g., chokidar).
+        FR2.2.2: It must dequeue entries (e.g., one at a time, or configurable small batch) for processing.
+        FR2.2.3: It must manage the status of queue entries (e.g., update status to 'processing', 'failed', 'processed') by rewriting the queue file or updating entries if the format allows.
+        FR2.2.4 (Rate Limiting): Implement a configurable rate limit for processing commits (e.g., max 3 commits per minute) to avoid overwhelming LLM APIs. This requires tracking the timestamps of recently processed commits.
+        FR2.2.5 (Concurrency Control): Use file locking (e.g., proper-lockfile) for all read/write operations on .mcp_queue to prevent data corruption.
+        FR2.2.6 (Connectivity Check): Before making an LLM API call, check for internet connectivity. If offline, delay processing and retry later.
+        FR2.2.7 (Retry Mechanism): For transient errors during commit processing (e.g., LLM API errors, network issues), implement an automatic retry mechanism with exponential backoff for a configurable number of attempts. If permanently failed, mark as 'failed' in queue/log.
+        FR2.2.8 (Error Logging): Log detailed errors encountered during daemon processing to a dedicated error log file (e.g., .mcp_errors/YYYY-MM-DD.log within the repo, or ~/.mcp/logs/daemon-errors-YYYY-MM-DD.log), including timestamp, commit SHA, error message, and stack trace.
+        FR2.2.9 (Dry Run Mode): The daemon must support a --dry-run option. In this mode, it will simulate the entire processing flow (diffing, fake LLM call) and print a summary of what would be done to stdout, without making actual LLM calls or writing to log files.
+
+F3: Code Analysis & Diff Extraction
+
+    FR3.1 (Changed File Identification): For a given commit SHA, the system must identify all files that were added, modified, deleted, or renamed.
+    FR3.2 (.mcpignore):
+        FR3.2.1: Support a .mcpignore file in the root of the user's repository.
+        FR3.2.2: This file will contain glob patterns (similar to .gitignore) specifying files or directories to be excluded from analysis.
+        FR3.2.3: Provide a default set of ignore patterns if .mcpignore is not present (e.g., node_modules/, *.lock, dist/).
+    FR3.3 (Text File Analysis): For each changed, non-ignored text file:
+        FR3.3.1: Retrieve the full content of the file before and after the commit.
+        FR3.3.2 (AST Parsing - JS/TS): If the file is JavaScript or TypeScript:
+            Parse the 'before' and 'after' content into Abstract Syntax Trees (ASTs).
+            Compare the ASTs to identify changes at the function level: added functions, deleted functions, and modified functions.
+            For modified functions, generate a textual diff of the function's code block.
+            The output should be a structured representation, e.g., { filePath: string, status: string, language: 'typescript' | 'javascript', functions: Array<{ name: string, changeType: 'added' | 'deleted' | 'modified', diff?: string, newCode?: string, oldCode?: string }> }.
+        FR3.3.3 (Raw Diff Fallback): If AST parsing is not supported for the file type, or if it fails, generate a raw textual diff (e.g., unified diff format) for the entire file.
+    FR3.4 (Binary File Handling): Identify binary files (e.g., based on git diff heuristics or file extensions). These files should be noted as changed but their content will not be sent to the LLM for summarization beyond filename and change status.
+    FR3.5 (Structured Output for LLM): Compile all collected diff information (file statuses, function changes for JS/TS, raw diffs for others, binary file notifications) into a structured, concise textual format suitable for input to an LLM prompt.
+
+F4: LLM-Powered Summarization
+    FR4.1 (Prompt Engineering):
+        FR4.1.1: Construct a well-defined prompt for the LLM that includes:
+            The structured diff output from F3.5.
+            Commit metadata: commit message, author, date.
+            Clear instructions for the LLM (e.g., "Summarize these code changes, focusing on the intent and impact. Output in Markdown format. Be concise yet comprehensive.").
+        FR4.1.2 (Few-Shot Examples - Optional): The system may incorporate few-shot examples into the prompt to guide the LLM towards desired summary style and quality (implementation detail, not a strict MVP requirement but good for AI to know).
+    FR4.2 (LLM Provider Abstraction):
+        FR4.2.1: Implement an abstraction layer (e.g., an LLMProvider interface) to support multiple LLM services.
+        FR4.2.2: Provide concrete implementations for: OpenAI, Google Gemini, and Anthropic Claude, selectable via the global ~/.mcp/config.json.
+    FR4.3 (API Interaction): Securely send the constructed prompt to the configured LLM provider's API using the API key from the global configuration.
+    FR4.4 (Token Management):
+        FR4.4.1: Before sending a prompt, estimate the number of input tokens (e.g., using tiktoken for OpenAI-compatible models).
+        FR4.4.2 (Chunking): If the estimated token count exceeds the LLM's context window limit (which should be known or configurable per model):
+            Implement a strategy to split the input diff data into smaller, processable chunks (e.g., summarize on a per-file basis or by splitting large diffs).
+            Generate summaries for each chunk.
+            Synthesize a final, coherent summary from the individual chunk summaries (this might involve a final LLM call to summarize the summaries).
+    FR4.5 (Output Handling):
+        FR4.5.1: The LLM's response (the commit summary) is expected in Markdown format.
+        FR4.5.2: If an LLM API call fails or returns an error, the system must handle this gracefully, log the error (see FR2.2.8), and use a standard fallback message for the log entry (e.g., "LLM summarization failed for commit [SHA]. Please review changes manually.").
+
+F5: Log Generation & Management
+
+    FR5.1 (Log Storage):
+        FR5.1.1: Generated summaries must be stored in Markdown files within a .mcp_logs/ directory at the root of the user's Git repository.
+        FR5.1.2: Log files must be named based on the date of the commit processing, in YYYY-MM-DD.md format. New entries are appended to the file corresponding to the current date.
+    FR5.2 (Log Entry Format): Each commit summary within a daily log file must consist of:
+        FR5.2.1 (YAML Front-matter): A YAML block containing structured metadata:
+            commit_sha: string
+            author: string (from Git commit)
+            commit_timestamp: string (ISO 8601 format from Git commit)
+            processing_timestamp: string (ISO 8601 format when summary was generated)
+            llm_provider: string (e.g., 'openai', 'gemini', 'claude')
+            llm_model: string (e.g., 'gpt-4o', 'gemini-1.5-pro')
+            llm_tokens_prompt?: number (if available)
+            llm_tokens_completion?: number (if available)
+            files_changed_count: number
+        FR5.2.2 (Markdown Heading): A Markdown heading (e.g., ### <commit_sha_short> - <commit_message_first_line>).
+        FR5.2.3 (Markdown Body): The LLM-generated summary in Markdown format.
+        FR5.2.4 (Separator): A clear separator (e.g., ---) between distinct log entries within the same daily file.
+    FR5.3 (CLI: mcp-local view [date]):
+        FR5.3.1: A command to view generated logs.
+        FR5.3.2: If [date] (in YYYY-MM-DD format) is provided, it opens the log file for that specific date.
+        FR5.3.3: If no date is provided, it opens the log file for the current date.
+        FR5.3.4: The command should attempt to open the Markdown file using the system's default application for .md files (e.g., using the open or xdg-open command).
+        FR5.3.5: If the log file for the specified date does not exist, it should inform the user.
+
+F6: Queue Management CLI
+
+    FR6.1 (CLI: mcp-local queue ls):
+        FR6.1.1: A command to list all entries currently in the .mcp_queue file for the current repository.
+        FR6.1.2: Output should include SHA, enqueue timestamp, and current status for each entry, formatted for readability in the console.
+    FR6.2 (CLI: mcp-local queue rm <sha>):
+        FR6.2.1: A command to remove a specific commit (identified by its full SHA) from the .mcp_queue.
+        FR6.2.2: It should confirm if the removal was successful or if the SHA was not found in the queue.
+
+NFR (Non-Functional Requirements):
+
+    NFR1 (Usability):
+        The setup process (mcp-local init) must be simple, with the daemon starting automatically.
+        CLI commands must have clear, intuitive names and provide helpful feedback and error messages.
+        Documentation (README) must be comprehensive and easy to follow.
+    NFR2 (Reliability & Resilience):
+        The system must be resilient to LLM API failures (using retries and fallbacks).
+        It must handle temporary offline scenarios gracefully (delaying processing).
+        The queue system must prevent loss of commit data slated for processing.
+        The daemon should restart or be easily restartable if it crashes (OS-level service management is out of scope for MVP, but daemon should be robust).
+    NFR3 (Performance):
+        The post-commit hook execution time must be minimal (target < 100ms) to not interfere with the user's Git workflow.
+        All computationally intensive tasks (diffing, AST parsing, LLM calls) must occur in the background daemon.
+        The background daemon should be reasonably efficient in terms of CPU and memory usage.
+    NFR4 (Configurability):
+        Users must be able to easily configure their preferred LLM provider, model, and API keys via ~/.mcp/config.json.
+        The .mcpignore file must allow users to fine-tune which files are processed.
+    NFR5 (Maintainability & Extensibility - Code Structure):
+        The codebase must be modular (e.g., distinct modules for core logic, CLI, LLM providers, AST parsers, queue management).
+        This modularity should facilitate future enhancements, such as adding support for new LLM providers or new programming languages for AST parsing.
+        Code should be well-documented and follow consistent styling (enforced by linters/formatters).
+    NFR6 (Security):
+        LLM API keys are sensitive. They must be stored in the user's ~/.mcp/config.json file. The tool itself will not transmit these keys anywhere other than to the configured LLM provider's API endpoint. Users are responsible for the permissions of their home directory files. The application should not introduce new vulnerabilities.
+
+6. Success Metrics
+
+    SM1 (Adoption): Number of active global installations and number of repositories initialized with MCP-Local.
+    SM2 (Usage): Average number of commit summaries successfully generated per active user/repository per week.
+    SM3 (User Satisfaction): Qualitative feedback from users (e.g., via surveys, GitHub issues) indicating perceived time savings, improved log quality, and ease of use.
+    SM4 (Reliability): Low rate of processing errors logged by the daemon; low number of unresolved issues related to failed summaries or daemon crashes.
+    SM5 (Feature Engagement): Usage statistics for auxiliary CLI commands (view, queue ls, queue rm). Percentage of users customizing LLM providers/models.
+
+7. Future Considerations / Out of Scope for MVP v1.0
+
+    FC1 (Centralized MCP Server): A full-fledged, multi-tenant server architecture enabling team-wide features, centralized billing for LLM usage, webhooks from Git hosting providers (GitHub, GitLab), and team dashboards.
+    FC2 (Direct IDE Integration): Rich integrations with IDEs like VS Code or Cursor to display summaries, trigger MCP actions, or configure the tool from within the editor UI.
+    FC3 (External Platform Integration): Pushing summaries or notifications to project management tools (e.g., Jira, Asana), communication platforms (e.g., Slack, Microsoft Teams), or other developer platforms (e.g., Windsurf, if its API allows).
+    FC4 (Web User Interface): A web-based UI for viewing logs (especially for a server version), managing settings, or viewing team analytics.
+    FC5 (Advanced Analytics & Reporting): Dashboards providing insights into commit patterns, summary generation trends, frequently modified files/functions, etc.
+    FC6 (Broader Language Support for AST): Extending detailed AST-based analysis to more programming languages beyond JavaScript/TypeScript (e.g., Python, Java, Go, Rust).
+    FC7 (VCS Agnosticism): Support for version control systems other than Git.
+    FC8 (Interactive Summary Refinement): Allowing users to provide feedback on summaries to an LLM for refinement.
+
+8. Technical Considerations (High-Level)
+
+    Primary Language/Runtime: Node.js with TypeScript.
+    Package Management: pnpm, organized as a monorepo (packages/core, packages/cli).
+    Key Libraries/Technologies (indicative, from original plan):
+        Git Operations: simple-git
+        AST Parsing: @babel/parser (for JS/TS)
+        LLM SDKs: openai, @google/generative-ai, anthropic
+        CLI Framework: yargs
+        File System Watching: chokidar
+        Queue File Locking: proper-lockfile
+        Date/Time Utility: dayjs
+        Enhanced File System Operations: fs-extra
+        YAML Parsing/Serialization: js-yaml
+        Token Counting: tiktoken (for OpenAI/compatible models)
+    Installation Method: Globally installable npm package.
+    Configuration Storage: JSON file (~/.mcp/config.json) in the user's home directory for global settings; local files within the repo for queue and logs.
